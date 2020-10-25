@@ -1,0 +1,77 @@
+version: '3.6'
+
+x-base: &base
+  image: ${ECR}/exchange2queue:${VERSION}
+  build:
+    context: .
+    dockerfile: Dockerfile
+  deploy:
+    restart_policy:
+      condition: on-failure
+  depends_on:
+    - rabbit
+
+services:
+  rabbit:
+    image: rabbitmq:3-management
+    deploy:
+      restart_policy:
+        condition: on-failure
+    ports:
+      - 5672:5672
+    environment:
+      RABBITMQ_ERLANG_COOKIE:
+      RABBITMQ_DEFAULT_VHOST: /
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS}
+
+  nginx:
+    image: ${ECR}/exchange2queue_nginx:${VERSION}
+    deploy:
+      restart_policy:
+        condition: on-failure
+    build:
+      context: .docker/nginx
+      dockerfile: Dockerfile
+    ports:
+      - 8080:8000
+    depends_on:
+      - rabbit
+      - api
+
+  api:
+    <<: *base
+    container_name: front
+    command: /bin/sh wait-for-it.sh rabbit:5672 -- gunicorn -w 4 api:app -b 0.0.0.0:5000
+    deploy:
+      restart_policy:
+        condition: on-failure
+    environment:
+      RABBIT_HOST: rabbit
+      RABBIT_USER: ${RABBITMQ_USER}
+      RABBIT_PASS: ${RABBITMQ_PASS}
+      API_TOKEN: ${API_TOKEN}
+
+  exchange2topic1:
+    <<: *base
+    command: /bin/sh wait-for-it.sh rabbit:5672 -- python exchange2queue.py
+    environment:
+      RABBIT_HOST: rabbit
+      RABBIT_USER: ${RABBITMQ_USER}
+      RABBIT_PASS: ${RABBITMQ_PASS}
+      EXCHANGE: exchange
+      QUEUE_TOPIC: topic1
+      QUEUE_DURABLE: 1
+      QUEUE_AUTO_DELETE: 0
+
+  exchange2topic2:
+    <<: *base
+    command: /bin/sh wait-for-it.sh rabbit:5672 -- python exchange2queue.py
+    environment:
+      RABBIT_HOST: rabbit
+      RABBIT_USER: ${RABBITMQ_USER}
+      RABBIT_PASS: ${RABBITMQ_PASS}
+      EXCHANGE: exchange
+      QUEUE_TOPIC: topic2
+      QUEUE_DURABLE: 1
+      QUEUE_AUTO_DELETE: 0
